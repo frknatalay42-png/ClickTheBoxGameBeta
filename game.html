@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Click the Box — Simple Game</title>
+  <style>
+    :root{
+      --bg:#0f1724;
+      --panel:#0b1220;
+      --accent:#22c1c3;
+      --muted:#9aa4b2;
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071021 0%, #0f1724 100%);color:white}
+    .wrap{max-width:980px;margin:28px auto;padding:20px}
+
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between}
+    h1{font-size:20px;margin:0}
+    .meta{color:var(--muted);font-size:13px}
+
+    .panel{background:rgba(255,255,255,0.03);border-radius:12px;padding:16px;margin-top:16px;box-shadow:0 6px 24px rgba(2,6,23,0.6)}
+
+    .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    label{font-size:13px;color:var(--muted)}
+    select,input[type=range]{appearance:none;background:transparent}
+
+    .play-area{height:420px;border-radius:10px;margin-top:16px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));position:relative;overflow:hidden;border:1px solid rgba(255,255,255,0.03)}
+
+    .box{position:absolute;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;touch-action:manipulation}
+    .scoreboard{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .stat{background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;font-weight:600}
+
+    .toolbar{display:flex;gap:8px;align-items:center}
+    button{background:linear-gradient(180deg,var(--accent),#16a6a8);border:0;padding:8px 12px;border-radius:8px;color:#041220;font-weight:700;cursor:pointer}
+    button.ghost{background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,0.04);font-weight:600}
+
+    footer{color:var(--muted);font-size:13px;margin-top:10px}
+
+    /* Responsive */
+    @media (max-width:640px){
+      .play-area{height:320px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Click the Box</h1>
+        <div class="meta">Click the box as many times as you can before time runs out — single-file HTML/CSS/JS</div>
+      </div>
+      <div class="scoreboard">
+        <div class="stat">Score: <span id="score">0</span></div>
+        <div class="stat">Time: <span id="time">30</span>s</div>
+        <div class="stat">High: <span id="high">0</span></div>
+      </div>
+    </header>
+
+    <div class="panel">
+      <div class="controls">
+        <div class="toolbar">
+          <button id="start">Start</button>
+          <button id="stop" class="ghost">Stop</button>
+          <button id="resetHigh" class="ghost">Reset Highscore</button>
+        </div>
+
+        <div style="margin-left:auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label>Duration
+            <select id="duration">
+              <option value="10">10s</option>
+              <option value="20">20s</option>
+              <option value="30" selected>30s</option>
+              <option value="60">60s</option>
+            </select>
+          </label>
+
+          <label>Box Size
+            <select id="size">
+              <option value="40">Small</option>
+              <option value="60" selected>Medium</option>
+              <option value="90">Large</option>
+            </select>
+          </label>
+
+          <label>Mode
+            <select id="mode">
+              <option value="static">Static (one box)</option>
+              <option value="pop">Pop (short appear/disappear)</option>
+              <option value="moving">Moving (slides)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div id="play" class="play-area" aria-live="polite" role="application"></div>
+
+      <footer>Tip: On mobile use taps. Highscore is stored in your browser.</footer>
+    </div>
+  </div>
+
+  <script>
+    // Click the Box — single-file JS
+    (()=>{
+      const play = document.getElementById('play');
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+      const resetHigh = document.getElementById('resetHigh');
+      const scoreEl = document.getElementById('score');
+      const timeEl = document.getElementById('time');
+      const highEl = document.getElementById('high');
+      const durationSel = document.getElementById('duration');
+      const sizeSel = document.getElementById('size');
+      const modeSel = document.getElementById('mode');
+
+      let score=0; let timeLeft=30; let timerId=null; let spawnTimer=null; let running=false; let box=null;
+      const HIGH_KEY = 'ctb_highscore_v1';
+
+      function loadHigh(){
+        const h = parseInt(localStorage.getItem(HIGH_KEY) || '0',10);
+        highEl.textContent = h;
+      }
+      loadHigh();
+
+      function updateHUD(){
+        scoreEl.textContent = score;
+        timeEl.textContent = timeLeft;
+      }
+
+      function rand(min,max){return Math.floor(Math.random()*(max-min+1))+min}
+
+      function createBox(){
+        removeBox();
+        box = document.createElement('div');
+        box.className='box';
+        const size = parseInt(sizeSel.value,10);
+        box.style.width = size+'px';
+        box.style.height = size+'px';
+        box.style.background = `linear-gradient(180deg, hsl(${rand(150,260)}deg 70% 55%), hsl(${rand(0,50)}deg 70% 45%))`;
+        box.style.boxShadow = '0 6px 18px rgba(2,6,23,0.6)';
+        box.textContent = '';
+        box.setAttribute('role','button');
+        box.setAttribute('aria-label','Clickable box');
+        positionBox(box,size);
+
+        // click / tap
+        const onClick = (e)=>{
+          e.stopPropagation();
+          if(!running) return;
+          score++;
+          updateHUD();
+          // quick feedback: brief scale
+          box.style.transform = 'scale(0.9)';
+          setTimeout(()=>{ if(box) box.style.transform='scale(1)'; },80);
+
+          // mode-specific behavior
+          const mode = modeSel.value;
+          if(mode==='pop'){
+            // disappear briefly then respawn
+            box.removeEventListener('click', onClick);
+            box.style.opacity = '0';
+            setTimeout(()=>{
+              if(!running) return;
+              createBox();
+            }, 120);
+          } else if(mode==='moving'){
+            // jump to new position smoothly
+            positionBox(box,size);
+          }
+        };
+
+        box.addEventListener('click', onClick);
+        // support touch
+        box.addEventListener('touchstart', (e)=>{ e.preventDefault(); onClick(e); }, {passive:false});
+
+        play.appendChild(box);
+      }
+
+      function positionBox(el,size){
+        const padding=8;
+        const areaW = play.clientWidth - size - padding*2;
+        const areaH = play.clientHeight - size - padding*2;
+        const x = rand(padding, Math.max(padding, areaW));
+        const y = rand(padding, Math.max(padding, areaH));
+        el.style.left = x+'px';
+        el.style.top = y+'px';
+        // small transition for moving mode
+        if(modeSel.value==='moving'){
+          el.style.transition = 'left 300ms ease, top 300ms ease';
+        } else {
+          el.style.transition = '';
+        }
+      }
+
+      function removeBox(){
+        if(box && box.parentNode) box.parentNode.removeChild(box);
+        box=null;
+      }
+
+      function startGame(){
+        if(running) return;
+        running=true;
+        score=0;
+        timeLeft = parseInt(durationSel.value,10);
+        updateHUD();
+        createBox();
+
+        // timer
+        timerId = setInterval(()=>{
+          timeLeft--;
+          updateHUD();
+          if(timeLeft<=0){ endGame(); }
+        },1000);
+
+        // pop mode: box only appears briefly and disappears on timer
+        if(modeSel.value==='pop'){
+          spawnTimer = setInterval(()=>{
+            // create then remove after brief duration
+            if(!running) return;
+            createBox();
+            setTimeout(()=>{ if(box) box.style.opacity='0'; }, 700);
+          }, 900);
+        }
+
+        // moving mode: keep repositioning occasionally
+        if(modeSel.value==='moving'){
+          spawnTimer = setInterval(()=>{
+            if(box) positionBox(box, parseInt(sizeSel.value,10));
+          }, 700);
+        }
+      }
+
+      function endGame(){
+        running=false;
+        clearInterval(timerId); timerId=null;
+        clearInterval(spawnTimer); spawnTimer=null;
+        // remove box after short pause
+        setTimeout(removeBox, 120);
+        // check highscore
+        const prev = parseInt(localStorage.getItem(HIGH_KEY) || '0',10);
+        if(score>prev){
+          localStorage.setItem(HIGH_KEY,String(score));
+          highEl.textContent = score;
+          alert('New highscore: '+score+' 🎉');
+        }
+      }
+
+      // UI wiring
+      startBtn.addEventListener('click', startGame);
+      stopBtn.addEventListener('click', ()=>{ if(running) endGame(); });
+      resetHigh.addEventListener('click', ()=>{ localStorage.removeItem(HIGH_KEY); loadHigh(); });
+
+      // update high on load
+      loadHigh();
+
+      // keyboard shortcuts
+      window.addEventListener('keydown', (e)=>{
+        if(e.key===' '){ e.preventDefault(); if(!running) startGame(); }
+        if(e.key==='Escape') { if(running) endGame(); }
+      });
+
+      // keep HUD in sync if user changes options during game
+      [durationSel,sizeSel,modeSel].forEach(s=>s.addEventListener('change', ()=>{
+        // if running and mode changed, reset spawn timers to adapt
+        if(running){
+          clearInterval(spawnTimer); spawnTimer=null;
+          if(modeSel.value==='pop'){
+            spawnTimer = setInterval(()=>{
+              if(!running) return; createBox(); setTimeout(()=>{ if(box) box.style.opacity='0'; },700);
+            },900);
+          } else if(modeSel.value==='moving'){
+            spawnTimer = setInterval(()=>{ if(box) positionBox(box, parseInt(sizeSel.value,10)); },700);
+          }
+        }
+      }));
+
+      // resize: ensure box stays in bounds
+      window.addEventListener('resize', ()=>{ if(box) positionBox(box, parseInt(sizeSel.value,10)); });
+
+    })();
+  </script>
+</body>
+</html>
